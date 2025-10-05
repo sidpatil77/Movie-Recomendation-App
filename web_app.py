@@ -1,28 +1,50 @@
-# web_app.py - Streamlit UI
+# web_app.py - Streamlit frontend connected to Flask backend
 import streamlit as st
-from recommender.model import MovieRecommender
+import requests
+import os
+
+# -----------------------------------------------------------------------------
+# ✅ CONFIGURATION
+# -----------------------------------------------------------------------------
+# Get the Flask API URL from environment variables (set in Render)
+API_URL = os.environ.get("API_URL", "http://localhost:5000")  # local fallback
+RECOMMEND_ENDPOINT = f"{API_URL}/recommend"
 
 st.set_page_config(page_title="Movie Recommender", layout="centered")
 
-@st.cache_resource
-def load_model():
-    return MovieRecommender("data/movies.csv", "data/credits.csv")
-
-recommender = load_model()
-
+# -----------------------------------------------------------------------------
+# 🎬 UI
+# -----------------------------------------------------------------------------
 st.title("🎬 Movie Recommender")
-st.write("Type a movie title and get similar suggestions (content-based).")
+st.write("Type a movie title and get similar suggestions (powered by Flask API).")
 
-movie = st.text_input("Movie title (e.g., Inception)")
+movie = st.text_input("🎞️ Movie title (e.g., Inception)")
 
 if st.button("Get Recommendations"):
-    if not movie:
+    if not movie.strip():
         st.warning("Please enter a movie title.")
     else:
         try:
-            recs = recommender.recommend(movie)
-            st.success("Top recommendations:")
-            for i, r in enumerate(recs, 1):
-                st.write(f"**{i}.** {r}")
-        except Exception as e:
-            st.error(str(e))
+            # -----------------------------------------------------------------------------
+            # 🌐 Call Flask backend
+            # -----------------------------------------------------------------------------
+            with st.spinner("Fetching recommendations..."):
+                response = requests.post(RECOMMEND_ENDPOINT, json={"movie": movie})
+            
+            # -----------------------------------------------------------------------------
+            # 📦 Handle Response
+            # -----------------------------------------------------------------------------
+            if response.status_code == 200:
+                data = response.json()
+                recs = data.get("recommendations", [])
+                if recs:
+                    st.success("Top Recommendations:")
+                    for i, r in enumerate(recs, 1):
+                        st.write(f"**{i}.** {r}")
+                else:
+                    st.info("No recommendations found for that movie.")
+            else:
+                st.error(f"Server returned an error: {response.status_code}")
+                st.text(response.text)
+        except requests.exceptions.RequestException as e:
+            st.error(f"Failed to connect to API: {e}")
