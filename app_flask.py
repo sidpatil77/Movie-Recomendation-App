@@ -1,66 +1,49 @@
 # app_flask.py
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify
+from recommender.model import MovieRecommender
+import threading
 import os
 
-app = Flask(__name__, template_folder="templates")
+app = Flask(__name__)
 
-# ------------------------------------------------------------
-# Lazy loading setup
-# ------------------------------------------------------------
-recommender = None  # model will be loaded only when needed
-
+# Global variable for the recommender (lazy loaded)
+recommender = None
+load_lock = threading.Lock()
 
 def get_recommender():
-    """Load recommender only when it's first needed"""
+    """Lazily load the recommender model (only once)."""
     global recommender
     if recommender is None:
-        from recommender.model import MovieRecommender
-        recommender = MovieRecommender("data/movies.csv", "data/credits.csv")
+        with load_lock:
+            if recommender is None:  # Double-check (thread-safe)
+                print("🔄 Loading recommender model...")
+                recommender = MovieRecommender("data/movies.csv", "data/credits.csv")
+                print("✅ Recommender model loaded.")
     return recommender
 
-
-# ------------------------------------------------------------
-# Routes
-# ------------------------------------------------------------
-@app.route("/", methods=["GET", "POST"])
-def index():
-    """Main web page for manual testing"""
-    recommendations = []
-    error = None
-    if request.method == "POST":
-        movie = request.form.get("movie", "")
-        if movie:
-            try:
-                recs = get_recommender().recommend(movie)
-                recommendations = recs
-            except Exception as e:
-                error = str(e)
-        else:
-            error = "Please enter a movie title."
-    return render_template("index.html", recommendations=recommendations, error=error)
-
+@app.route("/", methods=["GET"])
+def home():
+    return "🎬 Movie Recommender API is running!", 200
 
 @app.route("/recommend", methods=["POST"])
 def recommend():
-    """API endpoint used by Streamlit frontend"""
-    data = request.get_json()
-    movie = data.get("movie", "")
+    data = request.get_json() or {}
+    movie = data.get("movie", "").strip()
+
+    if not movie:
+        return jsonify({"error": "Missing 'movie' field"}), 400
+
     try:
         recs = get_recommender().recommend(movie)
         return jsonify({"recommendations": recs})
     except Exception as e:
-        return jsonify({"error": str(e)}), 400
-
+        print(f"❌ Error while recommending: {e}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/health")
 def health():
-    """Health check for Render"""
     return "OK", 200
 
-
-# ------------------------------------------------------------
-# Run app
-# ------------------------------------------------------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
